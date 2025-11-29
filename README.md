@@ -26,27 +26,51 @@ A comprehensive multimodal Retrieval-Augmented Generation (RAG) system that comb
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         PDF Documents                            │
+│                      PDF Documents                               │
 └────────────────────┬────────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Adobe Extract API                             │
-│              (Text, Tables, Images Extraction)                   │
+│               Adobe PDF Services API                             │
+│                 (ingestion.py)                                   │
+│  • ExtractTextInfoFromPDF()                                      │
+│  • Reading-order text                                            │
+│  • Table structures                                              │
+│  • Figure extraction                                             │
 └────────────────────┬────────────────────────────────────────────┘
+                     │
+                     ▼
+        ┌────────────────────────────┐
+        │  structuredData.json       │
+        │  + figures/ + tables/      │
+        └────────────┬───────────────┘
                      │
          ┌───────────┴───────────┐
          │                       │
          ▼                       ▼
 ┌──────────────────┐    ┌──────────────────┐
-│  Text Chunking   │    │ Image Captioning │
-│   (chunking.py)  │    │(img_captioning.py)│
+│  Text Chunking   │    │ Table Cleaning   │
+│  (chunking.py)   │    │(clean_tables.py) │
+│                  │    │                  │
+│ • Page docs      │    │ • Remove _x000D_ │
+│ • Semantic chunks│    │ • Normalize data │
 └────────┬─────────┘    └────────┬──────────┘
+         │                       │
+         │              ┌────────▼──────────┐
+         │              │ Image Captioning  │
+         │              │(img_captioning.py)│
+         │              │                   │
+         │              │ • Gemini 2.0 Flash│
+         │              │ • Visual + Context│
+         │              │ • Combined caption│
+         │              └────────┬──────────┘
          │                       │
          ▼                       ▼
 ┌──────────────────┐    ┌──────────────────┐
 │  CLIP Embeddings │    │  CLIP Embeddings │
-│    (Text/Table)  │    │     (Images)     │
+│   (Text/Table)   │    │     (Images)     │
+│                  │    │                  │
+│multimodal_indexer│    │multimodal_indexer│
 └────────┬─────────┘    └────────┬──────────┘
          │                       │
          ▼                       ▼
@@ -59,14 +83,31 @@ A comprehensive multimodal Retrieval-Augmented Generation (RAG) system that comb
                      │
                      ▼
          ┌────────────────────────┐
-         │   Parallel Retrieval   │
-         │   (MMR + Reranking)    │
+         │  Parallel Retrieval    │
+         │  (dual_qa_setup.py)    │
+         │                        │
+         │  • Async queries       │
+         │  • MMR diversity       │
+         │  • CLIP reranking      │
          └───────────┬────────────┘
                      │
                      ▼
          ┌────────────────────────┐
          │   Gemini Synthesis     │
          │  (Answer Generation)   │
+         │                        │
+         │  • Multimodal context  │
+         │  • Image paths included│
+         └────────────────────────┘
+                     │
+                     ▼
+         ┌────────────────────────┐
+         │  Streamlit Dashboard   │
+         │      (app.py)          │
+         │                        │
+         │  • Interactive UI      │
+         │  • Evaluation metrics  │
+         │  • Performance tracking│
          └────────────────────────┘
 ```
 
@@ -111,8 +152,8 @@ multimodal-rag/
 
 ```bash
 # Clone the repository
-git clone [<your-repo-url>](https://github.com/Khushi-c-sharma/multimodal-rag-agent)
-cd multimodal-rag-agent
+git clone <your-repo-url>
+cd multimodal-rag
 
 # Create virtual environment
 python -m venv venv
@@ -162,28 +203,45 @@ cp your_documents.pdf data/pdfs/
 
 ### 5. Run the Pipeline
 
-#### Step 1: Extract and Index Documents
+#### Complete Pipeline Flow:
 
 ```bash
-# Run ingestion pipeline
-# This will:
-# - Extract text, tables, images from PDFs using Adobe API
-# - Generate image captions
-# - Chunk text and tables
-# - Create CLIP embeddings
-# - Build FAISS indexes
+# Step 1: Extract from PDFs using Adobe API
+python -c "from ingestion import ExtractTextInfoFromPDF; ExtractTextInfoFromPDF()"
 
-python ingestion.py
-```
+# Step 2: Process extracted data
+# This will create structuredData.json and extract figures/tables
+# Output: output/ExtractTextInfoFromPDF/extract<timestamp>.zip
 
-#### Step 2: Launch Dashboard
+# Step 3: Unzip the extraction
+unzip output/ExtractTextInfoFromPDF/extract*.zip -d data/extracted/
 
-```bash
-# Start Streamlit app
+# Step 4: Run chunking pipeline
+python -c "from chunking import run_full_chunking_pipeline; \
+run_full_chunking_pipeline('data/extracted/structuredData.json', 'data/output')"
+
+# Step 5: Generate image captions
+python img_captioning.py
+
+# Step 6: Clean tables
+python -c "from clean_tables import load_clean_and_save_tables; \
+load_clean_and_save_tables('./data/extracted/tables', './data/clean/tables_csv', './data/clean/tables_xlsx')"
+
+# Step 7: Create FAISS indexes
+python multimodal_indexer.py
+
+# Step 8: Launch dashboard
 streamlit run app.py
 ```
 
-The dashboard will open at `http://localhost:8501`
+#### Quick Start (Automated):
+
+Or use the complete pipeline script:
+
+```bash
+# Run entire pipeline
+python run_pipeline.py --pdf_path data/pdfs/document.pdf
+```
 
 ---
 
@@ -191,56 +249,161 @@ The dashboard will open at `http://localhost:8501`
 
 ### Core Pipeline Modules
 
-#### `ingestion.py`
-Main ingestion pipeline orchestrator.
+#### 🔹 1. PDF Extraction — `ingestion.py`
 
-**Key Functions:**
-- `process_pdfs()`: Orchestrates entire pipeline
-- `extract_with_adobe()`: Calls Adobe Extract API
-- `process_extractions()`: Processes extraction results
+High-fidelity extraction powered by **Adobe PDF Services API**.
+
+**Provides:**
+- ✅ Reading-order text extraction
+- ✅ Table structures (with cell-level data)
+- ✅ Figure images (high-quality renditions)
+- ✅ `structuredData.json` + renditions ZIP output
+
+**Key Function:**
+```python
+from ingestion import ExtractTextInfoFromPDF
+
+# Extract from PDF
+ExtractTextInfoFromPDF()
+```
+
+**Output Structure:**
+```
+output/ExtractTextInfoFromPDF/
+└── extractYYYY-MM-DDTHH-MM-SS.zip
+    ├── structuredData.json      # Main extraction data
+    ├── figures/
+    │   ├── fig_001.png
+    │   ├── fig_002.png
+    │   └── ...
+    └── tables/
+        ├── table_001.xlsx
+        ├── table_002.xlsx
+        └── ...
+```
+
+**Adobe API Features:**
+- Maintains reading order
+- Preserves document structure
+- Extracts high-resolution images
+- Handles complex multi-column layouts
+- Identifies tables with cell boundaries
+
+---
+
+#### 🔹 2. Text Chunking — `chunking.py`
+
+Transforms `structuredData.json` into processable chunks.
+
+**Output Types:**
+1. **Raw Text**: Reading-order text from entire document
+2. **Page Documents**: Page-level Document objects
+3. **Chunked Documents**: Semantic chunks for RAG
 
 **Usage:**
 ```python
-from ingestion import process_pdfs
+from chunking import run_full_chunking_pipeline
 
-process_pdfs(
-    pdf_dir='./data/pdfs',
-    output_dir='./data/extracted'
+run_full_chunking_pipeline(
+    input_json="path/to/structuredData.json",
+    output_folder="data/output"
 )
 ```
 
-#### `chunking.py`
-Text and table chunking strategies.
+**Outputs:**
+```
+data/output/
+├── extracted_text.txt      # Full document text
+├── page_docs.json          # Page-level chunks
+└── chunked_docs.json       # Semantic chunks
+```
 
-**Key Functions:**
-- `chunk_text()`: Semantic text chunking
-- `chunk_table()`: Table-aware chunking
-- `recursive_chunk()`: Hierarchical chunking
+**Chunking Strategy:**
+- Respects paragraph boundaries
+- Maintains context windows
+- Preserves table integrity
+- Configurable chunk size and overlap
+
+---
+
+#### 🔹 3. Figure Captioning — `img_captioning.py`
+
+Generates **multimodal, context-aware** captions using **Gemini 2.0 Flash**.
 
 **Features:**
-- Preserves table structure
-- Maintains context windows
-- Handles overlapping chunks
+- 🎨 Visual description from image analysis
+- 📝 Context extraction from nearby text
+- 🔗 Combined caption with full context
+- ✅ Quality validation
 
-#### `img_captioning.py`
-Image caption generation using vision models.
+**Usage:**
+```python
+python img_captioning.py
+```
 
-**Key Functions:**
-- `generate_captions()`: Batch caption generation
-- `caption_single_image()`: Single image processing
+**Output:**
+```
+output/image_captions.json
+```
 
-**Supported Models:**
-- BLIP
-- GIT
-- ClipCap
+**Example Output:**
+```json
+{
+  "image_path": "figures/fig_001.png",
+  "quality_pass": true,
+  "captions": {
+    "visual": "Bar chart showing GDP growth from 2015-2024, with increasing trend",
+    "context": "Figure 2.1 from Section 2: Economic Indicators. Referenced in paragraph discussing macroeconomic trends.",
+    "combined": "Bar chart showing GDP growth from 2015-2024, with increasing trend. Figure 2.1 from Section 2: Economic Indicators, illustrating macroeconomic trends in Qatar's economy."
+  }
+}
+```
 
-#### `clean_tables.py`
-Table cleaning and normalization.
+**Caption Types:**
+- **Visual**: Pure image description
+- **Context**: Surrounding text context
+- **Combined**: Unified multimodal caption (used for indexing)
 
-**Key Functions:**
-- `clean_table_data()`: Remove artifacts
-- `normalize_table()`: Standardize format
-- `extract_table_metadata()`: Get table properties
+---
+
+#### 🔹 4. Table Cleaning — `clean_tables.py`
+
+Normalizes extracted Excel tables from Adobe API.
+
+**Cleaning Operations:**
+- Removes `_x000D_` artifacts
+- Fixes whitespace and formatting
+- Standardizes cell values
+- Saves as clean CSV/XLSX
+
+**Usage:**
+```python
+from clean_tables import load_clean_and_save_tables
+
+load_clean_and_save_tables(
+    folder_path="./extracted/tables",
+    output_csv_folder="./clean/tables_csv",
+    output_xlsx_folder="./clean/tables_xlsx"
+)
+```
+
+**Cleaning Steps:**
+1. Remove special characters (`_x000D_`, etc.)
+2. Strip extra whitespace
+3. Normalize cell formatting
+4. Validate table structure
+5. Save in multiple formats
+
+**Output:**
+```
+clean/
+├── tables_csv/
+│   ├── table_001.csv
+│   └── table_002.csv
+└── tables_xlsx/
+    ├── table_001.xlsx
+    └── table_002.xlsx
+```
 
 #### `multimodal_indexer.py`
 FAISS index creation with CLIP embeddings.
@@ -401,82 +564,43 @@ Historical performance analysis:
 
 ---
 
-## 🔧 Advanced Usage
-
-### Custom Chunking Strategy
-
-Edit `chunking.py`:
-
-```python
-def custom_chunk_strategy(text: str, chunk_size: int = 500) -> List[str]:
-    """Your custom chunking logic."""
-    # Implement your strategy
-    return chunks
-```
-
-### Adding New Image Captioning Models
-
-Edit `img_captioning.py`:
-
-```python
-from transformers import YourModel
-
-def caption_with_custom_model(image_path: str) -> str:
-    """Custom captioning implementation."""
-    model = YourModel.from_pretrained("model-name")
-    # Your logic
-    return caption
-```
-
-### Custom Evaluation Metrics
-
-Add to `evaluation_metrics.py`:
-
-```python
-def calculate_custom_metric(items: List[Dict]) -> float:
-    """Your custom metric."""
-    # Calculate metric
-    return score
-```
-
-Then display in `app.py`:
-
-```python
-st.metric("Custom Metric", f"{score:.3f}")
-```
-
----
-
 ## 🐛 Troubleshooting
 
 ### Adobe API Issues
 
 **Error: "Invalid credentials"**
-- Verify `ADOBE_CLIENT_ID` and `ADOBE_CLIENT_SECRET` in `.env`
-- Check credentials at Adobe Developer Console
-- Ensure PDF Services API is enabled
-
-**Error: "API quota exceeded"**
-- Check your Adobe API usage limits
-- Consider batch processing for large document sets
-- Implement retry logic with exponential backoff
-
-### FAISS Index Issues
-
-**Error: "No FAISS indexes loaded"**
 ```bash
-# Check if indexes exist
-ls -la faiss_indexes/text_tables/
-ls -la faiss_indexes/images/
+# Verify your credentials
+echo $ADOBE_CLIENT_ID
+echo $ADOBE_CLIENT_SECRET
 
-# If missing, run ingestion pipeline
-python ingestion.py
+# Check .env file
+cat .env | grep ADOBE
 ```
 
-**Error: "Could not open index.faiss"**
-- Ensure ingestion completed successfully
-- Check file permissions
-- Verify paths in configuration
+**Solutions:**
+- Verify `ADOBE_CLIENT_ID` and `ADOBE_CLIENT_SECRET` in `.env`
+- Check credentials at [Adobe Developer Console](https://developer.adobe.com/console)
+- Ensure PDF Services API is enabled for your project
+- Regenerate credentials if expired
+
+**Error: "API quota exceeded"**
+- Check your Adobe API usage limits in the console
+- Free tier: 500 API calls per month
+- Consider upgrading plan for production use
+- Implement request batching and caching
+
+**Error: "File too large"**
+- Adobe API limit: 100 MB per PDF
+- Split large PDFs into smaller files
+- Use compression tools before processing
+
+**Error: "Unsupported PDF version"**
+- Adobe supports PDF 1.3 to 2.0
+- Use Adobe Acrobat to convert older PDFs
+- Check PDF integrity with `pdfinfo` command
+
+---
 
 ### Memory Issues
 
