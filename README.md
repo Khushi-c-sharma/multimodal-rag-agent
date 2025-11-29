@@ -152,8 +152,8 @@ multimodal-rag/
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
-cd multimodal-rag
+git clone [<(https://github.com/Khushi-c-sharma/multimodal-rag-agent)>]
+cd multimodal-rag-agent
 
 # Create virtual environment
 python -m venv venv
