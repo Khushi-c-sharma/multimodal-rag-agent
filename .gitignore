@@ -1,0 +1,9 @@
+__pycache__
+.venv
+.vscode
+data
+faiss_indexes
+pdfservices-api-credentials.json
+.env
+extract2025-11-29T05-45-36
+.ipynb_checkpoints
